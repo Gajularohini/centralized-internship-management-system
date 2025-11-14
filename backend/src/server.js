@@ -7,7 +7,14 @@ const compression = require('compression');
 const morgan = require('morgan');
 const http = require('http');
 const socketio = require('socket.io');
-const { startMemoryDb, stopMemoryDb } = require('./config/memoryDb');
+
+// Only import memoryDb in development
+let startMemoryDb, stopMemoryDb;
+if (process.env.NODE_ENV === 'development') {
+  const memoryDb = require('./config/memoryDb');
+  startMemoryDb = memoryDb.startMemoryDb;
+  stopMemoryDb = memoryDb.stopMemoryDb;
+}
 
 const { errorHandler, notFound } = require('./middleware/errorHandler');
 
@@ -113,7 +120,9 @@ async function startServer() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
   console.log('\n🛑 Shutting down gracefully... - server.js:115');
-  await stopMemoryDb();
+  if (process.env.NODE_ENV === 'development' && stopMemoryDb) {
+    await stopMemoryDb();
+  }
   await mongoose.connection.close();
   process.exit(0);
 });
