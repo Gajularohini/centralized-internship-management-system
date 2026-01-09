@@ -337,6 +337,27 @@ jobs:
 ✗ Check database user permissions
 ```
 
+### DNS SRV (querySrv ENOTFOUND) errors
+If your service logs show errors like `querySrv ENOTFOUND _mongodb._tcp.<cluster>.mongodb.net` it means DNS SRV lookups failed (common on some hosting providers).
+
+- Quick fixes:
+   - Add your host's outbound IP(s) to Atlas Network Access or allow `0.0.0.0/0` temporarily for testing.
+   - Use a non-SRV connection string (seed list) instead of `mongodb+srv://`.
+      - In Atlas, when you click **Connect** → **Connect your application**, click the option to view a "Standard connection string (with seed list)" and copy that into `MONGODB_SEED` in your host's env vars.
+
+- Local DNS test (Node):
+```bash
+node -e "require('dns').resolveSrv('_mongodb._tcp.YOUR_CLUSTER.mongodb.net', console.log)"
+```
+If that command returns `ENOTFOUND` from the host where you deploy, SRV DNS lookups are blocked there.
+
+- Use these env vars on Render if needed:
+```
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/db
+MONGODB_SEED=mongodb://host1:27017,host2:27017,host3:27017/db?replicaSet=...
+FALLBACK_TO_MEMORY=true   # optional for dev/debug only
+```
+
 ### CORS errors
 ```
 ✗ Verify CLIENT_URL in backend .env

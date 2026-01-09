@@ -70,12 +70,12 @@ app.use(errorHandler);
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
-  console.log('New client connected: - server.js:66', socket.id);
+  console.log('New client connected: - server.js:73', socket.id);
 
   // Join user room
   socket.on('join', (userId) => {
     socket.join(userId);
-    console.log(`User ${userId} joined their room - server.js:71`);
+    console.log(`User ${userId} joined their room - server.js:78`);
   });
 
   // Handle chat messages
@@ -89,7 +89,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected: - server.js:85', socket.id);
+    console.log('Client disconnected: - server.js:92', socket.id);
   });
 });
 
@@ -98,28 +98,91 @@ async function startServer() {
   try {
     // Start in-memory MongoDB (development only)
     if (process.env.NODE_ENV === 'development') {
-      await startMemoryDb();
+      // startMemoryDb returns a connection URI; use it if MONGODB_URI is not set
+      try {
+        const memUri = await startMemoryDb();
+        if (!process.env.MONGODB_URI) {
+          process.env.MONGODB_URI = memUri;
+        }
+      } catch (err) {
+        console.error('Failed to start inmemory DB: - server.js:108', err);
+        throw err;
+      }
     }
 
-    // Connect to MongoDB
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('✅ MongoDB Connected - server.js:99');
+    // Connect to MongoDB with better error handling and optional fallback
+    function getMongoHostFromUri(uri) {
+      if (!uri) return 'MONGODB_URI not set';
+      try {
+        const at = uri.indexOf('@');
+        let hostPart = at !== -1 ? uri.slice(at + 1) : uri.replace(/^mongodb(\+srv)?:\/\//, '');
+        hostPart = hostPart.split('/')[0];
+        return hostPart;
+      } catch (e) {
+        return 'unknown';
+      }
+    }
+    console.log('🔎 Mongo host (masked): - server.js:125', getMongoHostFromUri(process.env.MONGODB_URI));
+
+    async function connectWithFallback(uri) {
+      try {
+        await mongoose.connect(uri);
+        console.log('✅ MongoDB Connected - server.js:130');
+        return;
+      } catch (err) {
+        // Detect DNS SRV resolution errors (common with mongodb+srv)
+        const isSrvDnsError = err && (err.code === 'ENOTFOUND' || (err.message && err.message.includes('querySrv')));
+        console.error('❗ MongoDB connection error - server.js:135', (err && err.message) || err);
+
+        // If we have an explicit non-SRV seed list, try it next
+        if (process.env.MONGODB_SEED && process.env.MONGODB_SEED !== uri) {
+          console.log('➡️ Trying nonSRV seed hosts from MONGODB_SEED - server.js:139');
+          try {
+            await mongoose.connect(process.env.MONGODB_SEED);
+            console.log('✅ MongoDB Connected via MONGODB_SEED - server.js:142');
+            return;
+          } catch (seedErr) {
+            console.error('❗ MONGODB_SEED connection failed - server.js:145', seedErr && seedErr.message ? seedErr.message : seedErr);
+          }
+        }
+
+        // If DNS SRV failed and fallback is allowed, start an in-memory DB and retry
+        const allowFallback = process.env.FALLBACK_TO_MEMORY === 'true' || process.env.NODE_ENV !== 'production';
+        if (isSrvDnsError && allowFallback && startMemoryDb) {
+          try {
+            console.log('🔁 DNS SRV lookup failed; starting inmemory MongoDB as fallback - server.js:153');
+            const memUri = await startMemoryDb();
+            process.env.MONGODB_URI = memUri;
+            await mongoose.connect(memUri);
+            console.log('✅ Connected to inmemory MongoDB fallback - server.js:157');
+            return;
+          } catch (memErr) {
+            console.error('❌ Inmemory fallback failed - server.js:160', memErr && memErr.message ? memErr.message : memErr);
+          }
+        }
+
+        // No fallback succeeded - rethrow to be handled by outer catch
+        throw err;
+      }
+    }
+
+    await connectWithFallback(process.env.MONGODB_URI);
 
     // Start server
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT} - server.js:104`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'} - server.js:105`);
+      console.log(`🚀 Server running on port ${PORT} - server.js:174`);
+      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'} - server.js:175`);
     });
   } catch (error) {
-    console.error('❌ Server Startup Error: - server.js:108', error);
+    console.error('❌ Server Startup Error: - server.js:178', error);
     process.exit(1);
   }
 }
 
 // Graceful shutdown
 process.on('SIGINT', async () => {
-  console.log('\n🛑 Shutting down gracefully... - server.js:115');
+  console.log('\n🛑 Shutting down gracefully... - server.js:185');
   if (process.env.NODE_ENV === 'development' && stopMemoryDb) {
     await stopMemoryDb();
   }
